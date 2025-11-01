@@ -38,7 +38,7 @@ jobs:
     steps:
       - name: Clone
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
-        uses: StsSoftware/DevOps/.github/actions/clone@master
+        uses: STS-SW/SharedWorkflows/.github/actions/clone@master
         with:
           repo-branch: ${{inputs.repo-branch}}
           devops-branch: "master"
@@ -47,7 +47,7 @@ jobs:
 
       - name: Setup
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
-        uses: StsSoftware/DevOps/.github/actions/setup@master
+        uses: STS-SW/SharedWorkflows/.github/actions/setup@master
         with:
           environment: dotnet
 
