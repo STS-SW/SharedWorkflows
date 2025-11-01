@@ -1,0 +1,60 @@
+---
+name: DotNet-Build-And-Test
+
+on:
+  workflow_call:
+    inputs:
+      repo-branch:
+        description: "Repository Branch"
+        type: string
+        required: true
+      platform:
+        description: "The steps will run only on the platform specified"
+        type: string
+        default: "All"
+      skip-pack:
+        description: "Do not execute dotnet pack"
+        type: boolean
+        default: false
+    secrets:
+      RepositoryToken:
+        required: true
+      RegistryToken:
+        required: true
+
+defaults:
+  run:
+    shell: pwsh
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Clone
+        if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
+        uses: StsSoftware/DevOps/.github/actions/clone@master
+        with:
+          repo-branch: ${{inputs.repo-branch}}
+          devops-branch: "master"
+          is_debug: false
+          token: ${{ secrets.RepositoryToken }}
+
+      - name: Setup
+        if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
+        uses: StsSoftware/DevOps/.github/actions/setup@master
+        with:
+          environment: dotnet
+
+      - name: DotNet Build And Test
+        if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
+        run: ./DevOps/Src/Utils/RunWorkFlow.ps1 -Folder ./Repo -FilesFilter *.csproj -Tasks DotNetBuildAndTest -PostWorkflowTask PostDotNetWorkFlow -Configuration @{}
+
+      - name: DotNet Pack
+        if: ${{ !inputs.skip-pack && runner.os == 'Windows' && github.ref == 'refs/heads/master' }}
+        run: ./DevOps/Src/Utils/RunWorkFlow.ps1 -Folder ./Repo -FilesFilter *.csproj -Tasks DotNetPack -Configuration @{ RegistryToken="${{ secrets.RegistryToken }}"; RepositoryToken="${{ secrets.RepositoryToken }}"; }

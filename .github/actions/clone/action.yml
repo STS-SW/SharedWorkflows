@@ -1,0 +1,71 @@
+# https://docs.github.com/en/actions/tutorials/create-actions/create-a-composite-action?platform=linux
+
+---
+name: Clone-Action
+description: "Clone DevOps and target repositories for build workflows"
+
+inputs:
+  repo-branch:
+    description: "Repository Branch"
+    required: true
+  devops-branch:
+    description: "DevOps repository branch"
+    default: "master"
+    required: false
+  is_debug:
+    description: "Run in debug mode"
+    default: "false"
+  token:
+    description: "GitHub token for accessing repositories"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Clone DevOps
+      uses: actions/checkout@v4
+      with:
+        repository: "StsSoftware/DevOps"
+        ref: ${{ inputs.devops-branch }}
+        path: "./DevOps"
+        token: ${{ inputs.token }}
+        fetch-depth: 1
+
+    - name: Clone Repo
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.repo-branch }}
+        path: "./Repo"
+        fetch-depth: 1
+
+    - name: Print current directory
+      if: ${{ inputs.is_debug == 'true' }}
+      shell: pwsh
+      run: Get-Location
+
+    - name: Print current directory content
+      if: ${{ inputs.is_debug == 'true' }}
+      shell: pwsh
+      run: |
+        function Show-FolderTree {
+            param (
+                [string]$Path = (Get-Location),
+                [int]$Level = 0
+            )
+
+            Get-ChildItem -Path $Path -Directory | ForEach-Object {
+                $folder = $_
+                $indent = ' ' * $Level
+                $fileCount = (Get-ChildItem -Path $folder.FullName -File | Measure-Object).Count
+
+                Write-Output ("$indent- $($folder.Name) [$fileCount files]")
+
+                Get-ChildItem -Path $folder.FullName -File | ForEach-Object {
+                    Write-Output ("$indent  $($_.Name)")
+                }
+
+                Show-FolderTree -Path $folder.FullName -Level ($Level + 2)
+            }
+        }
+
+        Show-FolderTree -Path .

@@ -1,0 +1,34 @@
+---
+name: Setup-Action
+description: "Setup development environment for different project types (dotnet, react, etc.)"
+
+inputs:
+  environment:
+    description: "Run environment (dotnet, react, ecc...)"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      if: ${{ inputs.environment == 'dotnet' }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20.x"
+
+    # - name: Install Playwright
+    #   if: ${{ inputs.environment == 'dotnet' }}
+    #   shell: pwsh
+    #   run: npx playwright install
+
+    - name: Install Playwright
+      if: ${{ inputs.environment == 'dotnet' }}
+      shell: pwsh
+      run: npm install -g quicktype
+
+    - name: Setup .NET 9.0
+      if: ${{ inputs.environment == 'dotnet' && runner.os == 'Linux' }}
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 9.x
+# npm install -g quicktype
