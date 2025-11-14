@@ -16,10 +16,10 @@ runs:
       with:
         node-version: "24.x"
 
-    - name: Install Playwright
-      if: ${{ inputs.environment == 'dotnet' }}
-      shell: pwsh
-      run: npx playwright install
+    # - name: Install Playwright
+    #   if: ${{ inputs.environment == 'dotnet' }}
+    #   shell: pwsh
+    #   run: npx playwright install
 
     - name: Install QuickType
       if: ${{ inputs.environment == 'dotnet' }}
