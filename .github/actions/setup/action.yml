@@ -14,21 +14,20 @@ runs:
       if: ${{ inputs.environment == 'dotnet' }}
       uses: actions/setup-node@v4
       with:
-        node-version: "20.x"
-
-    # - name: Install Playwright
-    #   if: ${{ inputs.environment == 'dotnet' }}
-    #   shell: pwsh
-    #   run: npx playwright install
+        node-version: "24.x"
 
     - name: Install Playwright
       if: ${{ inputs.environment == 'dotnet' }}
       shell: pwsh
+      run: npx playwright install
+
+    - name: Install QuickType
+      if: ${{ inputs.environment == 'dotnet' }}
+      shell: pwsh
       run: npm install -g quicktype
 
-    - name: Setup .NET 9.0
+    - name: Setup .NET 10.0
       if: ${{ inputs.environment == 'dotnet' && runner.os == 'Linux' }}
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: 9.x
-# npm install -g quicktype
+        dotnet-version: 10.x
