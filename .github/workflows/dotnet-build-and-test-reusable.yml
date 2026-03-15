@@ -51,6 +51,16 @@ jobs:
         with:
           environment: dotnet
 
+      - name: Log Cloned Branches
+        if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
+        run: |
+          Write-Host "************** Repo Data **************"
+          Write-Host "repo-branch  : ${{ inputs.repo-branch }}"
+          Write-Host "platform     : ${{ inputs.platform }}"
+          Write-Host "skip-pack    : ${{ inputs.skip-pack }}"
+          Write-Host "Repo   branch: $(git -C ./Repo    rev-parse --abbrev-ref HEAD)"
+          Write-Host "DevOps branch: $(git -C ./DevOps  rev-parse --abbrev-ref HEAD)"
+
       - name: DotNet Build And Test
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
         run: ./DevOps/Src/Utils/RunWorkFlow.ps1 -Folder ./Repo -FilesFilter *.csproj -Tasks DotNetBuildAndTest -PostWorkflowTask PostDotNetWorkFlow -Configuration @{}
