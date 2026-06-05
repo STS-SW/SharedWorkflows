@@ -66,5 +66,5 @@ jobs:
         run: ./DevOps/Src/Utils/RunWorkFlow.ps1 -Folder ./Repo -FilesFilter *.csproj -Tasks DotNetBuildAndTest -PostWorkflowTask PostDotNetWorkFlow -Configuration @{}
 
       - name: DotNet Pack
-        if: ${{ !inputs.skip-pack && runner.os == 'Windows' && github.ref == 'refs/heads/master' }}
+        if: ${{ !inputs.skip-pack && runner.os == 'Windows' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
         run: ./DevOps/Src/Utils/RunWorkFlow.ps1 -Folder ./Repo -FilesFilter *.csproj -Tasks DotNetPack -Configuration @{ RegistryToken="${{ secrets.RegistryToken }}"; RepositoryToken="${{ secrets.RepositoryToken }}"; }
