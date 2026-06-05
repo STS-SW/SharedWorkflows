@@ -23,7 +23,7 @@ runs:
   using: "composite"
   steps:
     - name: Clone DevOps
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         repository: "StsSoftware/DevOps"
         ref: ${{ inputs.devops-branch }}
@@ -32,7 +32,7 @@ runs:
         fetch-depth: 1
 
     - name: Clone Repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         ref: ${{ inputs.repo-branch }}
         path: "./Repo"
