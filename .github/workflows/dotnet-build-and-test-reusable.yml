@@ -16,6 +16,14 @@ on:
         description: "Do not execute dotnet pack"
         type: boolean
         default: false
+      job-timeout-minutes:
+        description: "Overall timeout (minutes) for the build-and-test job"
+        type: number
+        default: 45
+      test-timeout-minutes:
+        description: "Timeout (minutes) for the DotNet Build And Test step"
+        type: number
+        default: 30
     secrets:
       RepositoryToken:
         required: true
@@ -32,6 +40,7 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ inputs.job-timeout-minutes }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -103,6 +112,7 @@ jobs:
 
       - name: DotNet Build And Test
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
+        timeout-minutes: ${{ inputs.test-timeout-minutes }}
         run: ./DevOps/Src/Utils/RunWorkFlow.ps1 -Folder ./Repo -FilesFilter *.csproj -Tasks DotNetBuildAndTest -PostWorkflowTask PostDotNetWorkFlow -Configuration @{}
 
       - name: DotNet Pack
