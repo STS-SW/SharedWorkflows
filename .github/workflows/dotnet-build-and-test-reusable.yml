@@ -50,7 +50,7 @@ jobs:
         uses: STS-SW/SharedWorkflows/.github/actions/clone@master
         with:
           repo-branch: ${{inputs.repo-branch}}
-          devops-branch: "master"
+          clone-devops: "false"
           is_debug: false
           token: ${{ secrets.RepositoryToken }}
 
@@ -68,63 +68,29 @@ jobs:
           Write-Host "platform     : ${{ inputs.platform }}"
           Write-Host "skip-pack    : ${{ inputs.skip-pack }}"
           Write-Host "Repo   branch: $(git -C ./Repo    rev-parse --abbrev-ref HEAD)"
-          Write-Host "DevOps branch: $(git -C ./DevOps  rev-parse --abbrev-ref HEAD)"
 
-      # Repos consuming the Sts.Sdk / Sts.Test.Sdk MSBuild project SDKs pin exact versions in
-      # global.json (msbuild-sdks does not support floating versions). Developers manage their
-      # local pins; CI always builds against the latest published SDKs by rewriting the pins in
-      # the runner workspace (never committed). No-op for non-migrated repos.
-      - name: Pin Latest STS SDKs
+      # The CI engine is sts-tools (a published .NET global tool), not the legacy DevOps
+      # PowerShell engine. Install it from the GitHub Packages feed before the build steps.
+      - name: Install sts-tools
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
         run: |
-          $globalJsonPath = "./Repo/global.json"
-          if (-not (Test-Path $globalJsonPath)) {
-            Write-Host "No global.json in the repository, skipping the STS SDK pin"
-            exit 0
-          }
+          dotnet nuget add source "https://nuget.pkg.github.com/StsSoftware/index.json" `
+            --name sts-github --username ci --password "${{ secrets.RegistryToken }}" --store-password-in-clear-text
+          dotnet tool install --global sts-tools
 
-          $globalJson = Get-Content $globalJsonPath -Raw | ConvertFrom-Json
-          $sdks = $globalJson.'msbuild-sdks'
-          if (-not $sdks) {
-            Write-Host "global.json has no msbuild-sdks section, skipping"
-            exit 0
-          }
-
-          $headers = @{ Authorization = "Bearer ${{ secrets.RegistryToken }}" }
-          $changed = $false
-          foreach ($sdkId in @('Sts.Sdk', 'Sts.Test.Sdk')) {
-            if (-not $sdks.PSObject.Properties[$sdkId]) { continue }
-
-            $feed = "https://nuget.pkg.github.com/StsSoftware/download/$($sdkId.ToLowerInvariant())/index.json"
-            try {
-              $index = Invoke-RestMethod -Headers $headers $feed
-            }
-            catch {
-              Write-Warning "Could not query the $sdkId feed ($($_.Exception.Message)); keeping the committed pin"
-              continue
-            }
-
-            if (-not $index.versions) {
-              Write-Warning "No $sdkId version published yet; keeping the committed pin"
-              continue
-            }
-
-            $latest = ($index.versions | ForEach-Object { [System.Management.Automation.SemanticVersion]$_ } | Sort-Object)[-1].ToString()
-            $previous = $sdks.$sdkId
-            $sdks.$sdkId = $latest
-            $changed = $true
-            Write-Host "$sdkId pinned to [$latest] (committed pin was [$previous])"
-          }
-
-          if ($changed) {
-            $globalJson | ConvertTo-Json -Depth 10 | Set-Content $globalJsonPath
-          }
+      # Repos consuming the Sts.Sdk / Sts.Test.Sdk MSBuild project SDKs pin exact versions in
+      # global.json (msbuild-sdks does not support floating versions). CI always builds against the
+      # latest published SDKs by rewriting the pins in the runner workspace (never committed).
+      # No-op for repos without a global.json / msbuild-sdks section.
+      - name: Pin Latest STS SDKs
+        if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
+        run: sts-tools devops pinSdk --folder ./Repo --registryToken "${{ secrets.RegistryToken }}"
 
       - name: DotNet Build And Test
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
         timeout-minutes: ${{ inputs.test-timeout-minutes }}
-        run: ./DevOps/Src/Utils/RunWorkFlow.ps1 -Folder ./Repo -FilesFilter *.csproj -Tasks DotNetBuildAndTest -PostWorkflowTask PostDotNetWorkFlow -Configuration @{}
+        run: sts-tools devops runFolderWorkflow --folder ./Repo --isWorkflow
 
       - name: DotNet Pack
         if: ${{ !inputs.skip-pack && runner.os == 'Windows' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
-        run: ./DevOps/Src/Utils/RunWorkFlow.ps1 -Folder ./Repo -FilesFilter *.csproj -Tasks DotNetPack -Configuration @{ RegistryToken="${{ secrets.RegistryToken }}"; RepositoryToken="${{ secrets.RepositoryToken }}"; }
+        run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPack --isWorkflow --registryToken "${{ secrets.RegistryToken }}" --repositoryToken "${{ secrets.RepositoryToken }}"

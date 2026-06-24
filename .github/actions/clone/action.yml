@@ -12,6 +12,10 @@ inputs:
     description: "DevOps repository branch"
     default: "master"
     required: false
+  clone-devops:
+    description: "Clone the legacy DevOps repository (its PowerShell engine is superseded by sts-tools)"
+    default: "true"
+    required: false
   is_debug:
     description: "Run in debug mode"
     default: "false"
@@ -23,6 +27,7 @@ runs:
   using: "composite"
   steps:
     - name: Clone DevOps
+      if: ${{ inputs.clone-devops == 'true' }}
       uses: actions/checkout@v6
       with:
         repository: "StsSoftware/DevOps"
