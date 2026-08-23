@@ -71,11 +71,17 @@ jobs:
 
       # The CI engine is sts-tools (a published .NET global tool), not the legacy DevOps
       # PowerShell engine. Install it from the GitHub Packages feed before the build steps.
+      #
+      # The source name is load-bearing: NuGet indexes credentials by SOURCE NAME, and the
+      # sections are merged across the whole config chain. Naming it exactly as the repositories
+      # name it in their own nuget.config - `Sts.Software` - lets these credentials serve the
+      # source those files declare, so a repository never has to commit a token of its own.
+      # `<clear />` in a repository's <packageSources> clears sources, NOT credentials.
       - name: Install sts-tools
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
         run: |
           dotnet nuget add source "https://nuget.pkg.github.com/StsSoftware/index.json" `
-            --name sts-github --username ci --password "${{ secrets.RegistryToken }}" --store-password-in-clear-text
+            --name Sts.Software --username ci --password "${{ secrets.RegistryToken }}" --store-password-in-clear-text
           dotnet tool install --global sts-tools
 
       # Repos consuming the Sts.Sdk / Sts.Test.Sdk MSBuild project SDKs pin exact versions in
