@@ -24,11 +24,19 @@ on:
         description: "Timeout (minutes) for the DotNet Build And Test step"
         type: number
         default: 30
+      publish-container:
+        description: "Publish container images for the projects that declare a ContainerRepository"
+        type: boolean
+        default: false
     secrets:
       RepositoryToken:
         required: true
       RegistryToken:
         required: true
+      ContainerRegistryUser:
+        required: false
+      ContainerRegistryToken:
+        required: false
 
 defaults:
   run:
@@ -36,6 +44,7 @@ defaults:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build-and-test:
@@ -100,3 +109,11 @@ jobs:
       - name: DotNet Pack
         if: ${{ !inputs.skip-pack && runner.os == 'Windows' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
         run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPack --isWorkflow --registryToken "${{ secrets.RegistryToken }}" --repositoryToken "${{ secrets.RepositoryToken }}"
+
+      # Same shape as DotNet Pack: an artifact produced once the tests of this job have passed.
+      # Linux, because the image this produces is what a container platform runs - the mirror of
+      # DotNet Pack gating on Windows. A project that declares no ContainerRepository is skipped by
+      # the task itself, so pointing this at *.csproj is safe for every repository.
+      - name: DotNet Publish Container
+        if: ${{ inputs.publish-container && runner.os == 'Linux' && (inputs.platform == 'All' || inputs.platform==runner.os) && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}
+        run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPublishContainer --isWorkflow --goToGitRoot --registryToken "${{ secrets.RegistryToken }}" --containerRegistryUser "${{ secrets.ContainerRegistryUser }}" --containerRegistryToken "${{ secrets.ContainerRegistryToken }}"
