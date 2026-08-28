@@ -115,5 +115,5 @@ jobs:
       # DotNet Pack gating on Windows. A project that declares no ContainerRepository is skipped by
       # the task itself, so pointing this at *.csproj is safe for every repository.
       - name: DotNet Publish Container
-        if: ${{ inputs.publish-container && runner.os == 'Linux' && (inputs.platform == 'All' || inputs.platform==runner.os) && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}
-        run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPublishContainer --isWorkflow --goToGitRoot --registryToken "${{ secrets.RegistryToken }}" --containerRegistryUser "${{ secrets.ContainerRegistryUser }}" --containerRegistryToken "${{ secrets.ContainerRegistryToken }}"
+        if: ${{ inputs.publish-container && runner.os == 'Linux' && (inputs.platform == 'All' || inputs.platform==runner.os) && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
+        run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPublishContainer --isWorkflow --goToGitRoot --registryToken "${{ secrets.RegistryToken }}" --repositoryToken "${{ secrets.RepositoryToken }}" --containerRegistryUser "${{ secrets.ContainerRegistryUser }}" --containerRegistryToken "${{ secrets.ContainerRegistryToken }}"
