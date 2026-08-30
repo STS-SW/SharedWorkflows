@@ -28,6 +28,10 @@ on:
         description: "Publish container images for the projects that declare a ContainerRepository"
         type: boolean
         default: false
+      publish-container-latest:
+        description: "Also point `latest` at the published image. A release decision: only the official pipeline of a repository should set it, because `latest` is what an unqualified pull and a default deployment resolve to"
+        type: boolean
+        default: false
     secrets:
       RepositoryToken:
         required: true
@@ -114,6 +118,10 @@ jobs:
       # Linux, because the image this produces is what a container platform runs - the mirror of
       # DotNet Pack gating on Windows. A project that declares no ContainerRepository is skipped by
       # the task itself, so pointing this at *.csproj is safe for every repository.
+      #
+      # The image is tagged with the project's version, and a version already in the registry is not
+      # republished - so a merge that forgot to bump the version publishes nothing rather than
+      # replacing a released image. `latest` moves only when the caller asked for it.
       - name: DotNet Publish Container
         if: ${{ inputs.publish-container && runner.os == 'Linux' && (inputs.platform == 'All' || inputs.platform==runner.os) && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
-        run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPublishContainer --isWorkflow --goToGitRoot --registryToken "${{ secrets.RegistryToken }}" --repositoryToken "${{ secrets.RepositoryToken }}" --containerRegistryUser "${{ secrets.ContainerRegistryUser }}" --containerRegistryToken "${{ secrets.ContainerRegistryToken }}"
+        run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPublishContainer --isWorkflow --goToGitRoot ${{ inputs.publish-container-latest && '--containerPublishLatest' || '' }} --registryToken "${{ secrets.RegistryToken }}" --repositoryToken "${{ secrets.RepositoryToken }}" --containerRegistryUser "${{ secrets.ContainerRegistryUser }}" --containerRegistryToken "${{ secrets.ContainerRegistryToken }}"
