@@ -36,10 +36,14 @@ runs:
         token: ${{ inputs.token }}
         fetch-depth: 1
 
+    # On a pull request the ref is left empty, so actions/checkout takes the pull request's own merge ref
+    # (refs/pull/<n>/merge): the change under review, merged onto its base. The callers pass
+    # `github.event.ref` as repo-branch, which is empty on a pull_request event and falls back to the
+    # default branch, so every pull request used to build and test master/main instead of its own code.
     - name: Clone Repo
       uses: actions/checkout@v6
       with:
-        ref: ${{ inputs.repo-branch }}
+        ref: ${{ github.event_name != 'pull_request' && inputs.repo-branch || '' }}
         path: "./Repo"
         fetch-depth: 1
 
