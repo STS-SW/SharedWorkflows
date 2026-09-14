@@ -44,6 +44,10 @@ on:
         description: "Days the failure artifact is kept"
         type: number
         default: 7
+      install-quicktype:
+        description: "Install the quicktype npm package in the test job. Only a repository whose code or tests run quicktype needs it"
+        type: boolean
+        default: true
     secrets:
       RepositoryToken:
         required: true
@@ -62,8 +66,16 @@ permissions:
   contents: write
   packages: write
 
+# Two kinds of run, never mixed on one machine:
+# - a pull request, a manual dispatch or a schedule builds and tests;
+# - a push to master/main publishes, on fresh runners where no test has run.
+# The code a push publishes was tested by the pull request that brought it, on the tree the merge produced,
+# so the push does not test it a third time. Publishing apart also keeps whatever a test run writes into
+# the checkout out of a package or an image: a fresh checkout is a known state, which `dotnet clean` alone
+# is not, since it removes only what MSBuild built.
 jobs:
   build-and-test:
+    if: ${{ !(github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
     strategy:
@@ -85,6 +97,7 @@ jobs:
         uses: STS-SW/SharedWorkflows/.github/actions/setup@master
         with:
           environment: dotnet
+          install-quicktype: ${{ inputs.install-quicktype }}
 
       - name: Log Cloned Branches
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
@@ -120,10 +133,18 @@ jobs:
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
         run: sts-tools devops pinSdk --folder ./Repo --registryToken "${{ secrets.RegistryToken }}"
 
+      # runFolderWorkflow spelled out, plus a configuration. The runner starts from a fresh checkout, so a
+      # per-project clean protects nothing - and it deletes the outputs of the referenced projects too, which
+      # with --force made every project recompile its whole reference graph. Without both, MSBuild compiles a
+      # shared library once and every later project reuses it. What a platform tests is the repository's
+      # choice, declared per project in a <project>.csproj.<platform>.workflow sidecar (TestArguments).
       - name: DotNet Build And Test
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
         timeout-minutes: ${{ inputs.test-timeout-minutes }}
-        run: sts-tools devops runFolderWorkflow --folder ./Repo --isWorkflow
+        run: |
+          $config = Join-Path $env:RUNNER_TEMP "build-once.workflow.json"
+          '{ "BuildClean": false, "BuildForce": false }' | Set-Content -Path $config -Encoding utf8
+          sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetBuildAndTest --postWorkflowTask PostDotNetWorkFlow --goToGitRoot --onErrorContinue --isWorkflow --config $config
 
       # What a failed run leaves behind dies with the runner unless it is uploaded: the test results,
       # and whatever the tests themselves wrote to explain a failure. Without it an intermittent
@@ -138,18 +159,75 @@ jobs:
           retention-days: ${{ inputs.failure-artifact-retention-days }}
           if-no-files-found: ignore
 
+  # Packages, on Windows as before, on a runner of its own. The checkout is the pushed commit itself
+  # (github.sha), not the branch tip at checkout time: a rerun after the branch moved on publishes what was
+  # pushed, not whatever came after it. DotNetPack cleans each project before packing.
+  pack:
+    if: ${{ !inputs.skip-pack && github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
+    runs-on: windows-latest
+    timeout-minutes: ${{ inputs.job-timeout-minutes }}
+    steps:
+      - name: Clone
+        uses: STS-SW/SharedWorkflows/.github/actions/clone@master
+        with:
+          repo-branch: ${{ github.sha }}
+          clone-devops: "false"
+          is_debug: false
+          token: ${{ secrets.RepositoryToken }}
+
+      - name: Setup
+        uses: STS-SW/SharedWorkflows/.github/actions/setup@master
+        with:
+          environment: dotnet
+          install-quicktype: "false"
+
+      - name: Install sts-tools
+        run: |
+          dotnet nuget add source "https://nuget.pkg.github.com/StsSoftware/index.json" `
+            --name Sts.Software --username ci --password "${{ secrets.RegistryToken }}" --store-password-in-clear-text
+          dotnet tool install --global sts-tools
+
+      - name: Pin Latest STS SDKs
+        run: sts-tools devops pinSdk --folder ./Repo --registryToken "${{ secrets.RegistryToken }}"
+
       - name: DotNet Pack
-        if: ${{ !inputs.skip-pack && runner.os == 'Windows' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
         run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPack --isWorkflow --registryToken "${{ secrets.RegistryToken }}" --repositoryToken "${{ secrets.RepositoryToken }}"
 
-      # Same shape as DotNet Pack: an artifact produced once the tests of this job have passed.
-      # Linux, because the image this produces is what a container platform runs - the mirror of
-      # DotNet Pack gating on Windows. A project that declares no ContainerRepository is skipped by
-      # the task itself, so pointing this at *.csproj is safe for every repository.
-      #
-      # The image is tagged with the project's version, and a version already in the registry is not
-      # republished - so a merge that forgot to bump the version publishes nothing rather than
-      # replacing a released image. `latest` moves only when the caller asked for it.
+  # Linux, because the image this produces is what a container platform runs - the mirror of the pack job
+  # running on Windows. A project that declares no ContainerRepository is skipped by the task itself, so
+  # pointing this at *.csproj is safe for every repository. DotNetPublishContainer cleans the project before
+  # publishing.
+  #
+  # The image is tagged with the project's version, and a version already in the registry is not
+  # republished - so a merge that forgot to bump the version publishes nothing rather than
+  # replacing a released image. `latest` moves only when the caller asked for it.
+  publish-container:
+    if: ${{ inputs.publish-container && (inputs.platform == 'All' || inputs.platform == 'Linux') && github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.job-timeout-minutes }}
+    steps:
+      - name: Clone
+        uses: STS-SW/SharedWorkflows/.github/actions/clone@master
+        with:
+          repo-branch: ${{ github.sha }}
+          clone-devops: "false"
+          is_debug: false
+          token: ${{ secrets.RepositoryToken }}
+
+      - name: Setup
+        uses: STS-SW/SharedWorkflows/.github/actions/setup@master
+        with:
+          environment: dotnet
+          install-quicktype: "false"
+
+      - name: Install sts-tools
+        run: |
+          dotnet nuget add source "https://nuget.pkg.github.com/StsSoftware/index.json" `
+            --name Sts.Software --username ci --password "${{ secrets.RegistryToken }}" --store-password-in-clear-text
+          dotnet tool install --global sts-tools
+
+      - name: Pin Latest STS SDKs
+        run: sts-tools devops pinSdk --folder ./Repo --registryToken "${{ secrets.RegistryToken }}"
+
       - name: DotNet Publish Container
-        if: ${{ inputs.publish-container && runner.os == 'Linux' && (inputs.platform == 'All' || inputs.platform==runner.os) && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
         run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPublishContainer --isWorkflow --goToGitRoot ${{ inputs.publish-container-latest && '--containerPublishLatest' || '' }} --registryToken "${{ secrets.RegistryToken }}" --repositoryToken "${{ secrets.RepositoryToken }}" --containerRegistryUser "${{ secrets.ContainerRegistryUser }}" --containerRegistryToken "${{ secrets.ContainerRegistryToken }}"
