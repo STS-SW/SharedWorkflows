@@ -32,6 +32,18 @@ on:
         description: "Also point `latest` at the published image. A release decision: only the official pipeline of a repository should set it, because `latest` is what an unqualified pull and a default deployment resolve to"
         type: boolean
         default: false
+      fail-fast:
+        description: "Cancel the other operating system's job as soon as one fails. Off, both jobs run to the end, so an intermittent failure on one system does not hide the result of the other and a rerun is not needed to learn it"
+        type: boolean
+        default: true
+      failure-artifact-paths:
+        description: "Paths (one per line, relative to the workspace, the repository being cloned into ./Repo) uploaded as an artifact when the job fails - test results, captures, traces. Nothing is uploaded on success"
+        type: string
+        default: "Repo/_WorkFlowResults"
+      failure-artifact-retention-days:
+        description: "Days the failure artifact is kept"
+        type: number
+        default: 7
     secrets:
       RepositoryToken:
         required: true
@@ -55,6 +67,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
     strategy:
+      fail-fast: ${{ inputs.fail-fast }}
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
@@ -111,6 +124,19 @@ jobs:
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
         timeout-minutes: ${{ inputs.test-timeout-minutes }}
         run: sts-tools devops runFolderWorkflow --folder ./Repo --isWorkflow
+
+      # What a failed run leaves behind dies with the runner unless it is uploaded: the test results,
+      # and whatever the tests themselves wrote to explain a failure. Without it an intermittent
+      # failure can only be read from the log, and a rerun that passes erases the only evidence.
+      # The attempt is part of the name because a rerun of the failed jobs belongs to the same run.
+      - name: Upload Failure Artifacts
+        if: ${{ failure() && (inputs.platform == 'All' || inputs.platform==runner.os) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-${{ runner.os }}-attempt-${{ github.run_attempt }}
+          path: ${{ inputs.failure-artifact-paths }}
+          retention-days: ${{ inputs.failure-artifact-retention-days }}
+          if-no-files-found: ignore
 
       - name: DotNet Pack
         if: ${{ !inputs.skip-pack && runner.os == 'Windows' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
