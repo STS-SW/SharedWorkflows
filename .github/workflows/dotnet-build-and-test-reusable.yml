@@ -85,7 +85,7 @@ jobs:
     steps:
       - name: Clone
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
-        uses: STS-SW/SharedWorkflows/.github/actions/clone@master
+        uses: STS-SW/SharedWorkflows/.github/actions/clone@dev/ci-test-once-publish-apart
         with:
           repo-branch: ${{inputs.repo-branch}}
           clone-devops: "false"
@@ -94,7 +94,7 @@ jobs:
 
       - name: Setup
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
-        uses: STS-SW/SharedWorkflows/.github/actions/setup@master
+        uses: STS-SW/SharedWorkflows/.github/actions/setup@dev/ci-test-once-publish-apart
         with:
           environment: dotnet
           install-quicktype: ${{ inputs.install-quicktype }}
@@ -168,7 +168,7 @@ jobs:
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
     steps:
       - name: Clone
-        uses: STS-SW/SharedWorkflows/.github/actions/clone@master
+        uses: STS-SW/SharedWorkflows/.github/actions/clone@dev/ci-test-once-publish-apart
         with:
           repo-branch: ${{ github.sha }}
           clone-devops: "false"
@@ -176,7 +176,7 @@ jobs:
           token: ${{ secrets.RepositoryToken }}
 
       - name: Setup
-        uses: STS-SW/SharedWorkflows/.github/actions/setup@master
+        uses: STS-SW/SharedWorkflows/.github/actions/setup@dev/ci-test-once-publish-apart
         with:
           environment: dotnet
           install-quicktype: "false"
@@ -207,7 +207,7 @@ jobs:
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
     steps:
       - name: Clone
-        uses: STS-SW/SharedWorkflows/.github/actions/clone@master
+        uses: STS-SW/SharedWorkflows/.github/actions/clone@dev/ci-test-once-publish-apart
         with:
           repo-branch: ${{ github.sha }}
           clone-devops: "false"
@@ -215,7 +215,7 @@ jobs:
           token: ${{ secrets.RepositoryToken }}
 
       - name: Setup
-        uses: STS-SW/SharedWorkflows/.github/actions/setup@master
+        uses: STS-SW/SharedWorkflows/.github/actions/setup@dev/ci-test-once-publish-apart
         with:
           environment: dotnet
           install-quicktype: "false"
