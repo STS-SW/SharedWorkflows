@@ -45,9 +45,9 @@ on:
         type: number
         default: 7
       install-quicktype:
-        description: "Install the quicktype npm package in the test job. Only a repository whose code or tests run quicktype needs it"
+        description: "Install the quicktype npm package in the test job. Only a repository whose code or tests run quicktype needs it, so it is off unless asked for — today only Sts.Lib asks"
         type: boolean
-        default: true
+        default: false
     secrets:
       RepositoryToken:
         required: true
