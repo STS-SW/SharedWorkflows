@@ -7,8 +7,8 @@ inputs:
     description: "Run environment (dotnet, react, ecc...)"
     required: true
   install-quicktype:
-    description: "Install the quicktype npm package globally. Only a repository whose code or tests run quicktype needs it, and it costs about a minute on Windows"
-    default: "true"
+    description: "Install the quicktype npm package globally. Only a repository whose code or tests run quicktype needs it, and it costs about a minute on Windows, so a repository that needs it asks for it"
+    default: "false"
     required: false
 
 runs:
