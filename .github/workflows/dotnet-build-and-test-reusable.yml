@@ -159,6 +159,74 @@ jobs:
           retention-days: ${{ inputs.failure-artifact-retention-days }}
           if-no-files-found: ignore
 
+  # The code index of a framework repository, refreshed on the release pull request (staging -> master/main)
+  # once its build and tests are green: Build -> Test -> Reindex -> Push -> Merge. The index is committed on
+  # staging, the head of that pull request, so the rebase merge carries it to master/main like any other
+  # commit, and the post-release realignment brings it back to staging. A repository without a committed
+  # .sts-framework-repo is not indexed. The commit is made only when the content of the index changed -
+  # `sts-tools index build` compares fingerprints - and carries [skip ci]: it changes no code, and the
+  # tests of the code it describes have just passed. RepositoryToken pushes it: the identity behind that
+  # secret must be allowed to push to staging.
+  code-index:
+    needs: build-and-test
+    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'staging' && (github.base_ref == 'master' || github.base_ref == 'main') }}
+    runs-on: windows-latest
+    timeout-minutes: ${{ inputs.job-timeout-minutes }}
+    steps:
+      # The branch itself, not the pull request's merge ref: the commit goes on top of staging.
+      - name: Checkout Staging
+        uses: actions/checkout@v6
+        with:
+          ref: staging
+          path: "./Repo"
+          fetch-depth: 1
+          token: ${{ secrets.RepositoryToken }}
+
+      - name: Detect Framework Repository
+        id: marker
+        run: |
+          $isFramework = Test-Path "./Repo/.sts-framework-repo"
+          "framework=$($isFramework.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          Write-Host "Framework repository: $isFramework"
+
+      - name: Setup
+        if: ${{ steps.marker.outputs.framework == 'true' }}
+        uses: STS-SW/SharedWorkflows/.github/actions/setup@master
+        with:
+          environment: dotnet
+          install-quicktype: "false"
+
+      - name: Install sts-tools
+        if: ${{ steps.marker.outputs.framework == 'true' }}
+        run: |
+          dotnet nuget add source "https://nuget.pkg.github.com/StsSoftware/index.json" `
+            --name Sts.Software --username ci --password "${{ secrets.RegistryToken }}" --store-password-in-clear-text
+          dotnet tool install --global sts-tools
+
+      - name: Pin Latest STS SDKs
+        if: ${{ steps.marker.outputs.framework == 'true' }}
+        run: sts-tools devops pinSdk --folder ./Repo --registryToken "${{ secrets.RegistryToken }}"
+
+      - name: Reindex
+        if: ${{ steps.marker.outputs.framework == 'true' }}
+        run: sts-tools index build --repository ./Repo --properties "IsWorkflow=true"
+
+      # Only the index folder is staged: the SDK pins rewritten above belong to the runner, never to the
+      # repository.
+      - name: Push Index
+        if: ${{ steps.marker.outputs.framework == 'true' }}
+        working-directory: ./Repo
+        run: |
+          git add -- .sts-index
+          if (-not (git diff --cached --name-only)) {
+            Write-Host "Index unchanged: nothing to commit."
+            exit 0
+          }
+          git config user.name "sts-code-index"
+          git config user.email "sts-code-index@users.noreply.github.com"
+          git commit -m "🗂️ chore(index): refresh the code index [skip ci]"
+          git push origin HEAD:staging
+
   # Packages, on Windows as before, on a runner of its own. The checkout is the pushed commit itself
   # (github.sha), not the branch tip at checkout time: a rerun after the branch moved on publishes what was
   # pushed, not whatever came after it. DotNetPack cleans each project before packing.
