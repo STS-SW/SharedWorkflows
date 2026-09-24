@@ -48,6 +48,10 @@ on:
         description: "Install the quicktype npm package in the test job. Only a repository whose code or tests run quicktype needs it, so it is off unless asked for — today only Sts.Lib asks"
         type: boolean
         default: false
+      release-from-staging:
+        description: "The repository releases staging into master/main by fast-forward: a pull request into master/main must come from staging, and the `release` label on the release pull request pushes its tested head to master/main. Off for the repositories that keep their own branching model"
+        type: boolean
+        default: false
     secrets:
       RepositoryToken:
         required: true
@@ -57,6 +61,11 @@ on:
         required: false
       ContainerRegistryToken:
         required: false
+      # The pushes the pipeline makes to staging (the code index) and to master/main (the release). A personal
+      # access token, because a push made with GITHUB_TOKEN starts no workflow, and the push to master/main has
+      # to start the one that publishes.
+      ReleaseToken:
+        required: false
 
 defaults:
   run:
@@ -65,17 +74,22 @@ defaults:
 permissions:
   contents: write
   packages: write
+  pull-requests: write
+  checks: read
 
-# Two kinds of run, never mixed on one machine:
+# Three kinds of run, never mixed on one machine:
 # - a pull request, a manual dispatch or a schedule builds and tests;
+# - a push to staging refreshes the code index of a framework repository, and nothing else;
 # - a push to master/main publishes, on fresh runners where no test has run.
-# The code a push publishes was tested by the pull request that brought it, on the tree the merge produced,
-# so the push does not test it a third time. Publishing apart also keeps whatever a test run writes into
-# the checkout out of a package or an image: a fresh checkout is a known state, which `dotnet clean` alone
-# is not, since it removes only what MSBuild built.
+# The code a push publishes was tested by the pull request that brought it: the release pushes to master/main
+# exactly the head the release pull request tested, so the push does not test it again. Publishing apart also
+# keeps whatever a test run writes into the checkout out of a package or an image: a fresh checkout is a known
+# state, which `dotnet clean` alone is not, since it removes only what MSBuild built.
 jobs:
+  # Not on a push to staging (the code index runs there), not on a push to master/main (publishing runs there),
+  # and not when a label is added: a label changes no code.
   build-and-test:
-    if: ${{ !(github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')) }}
+    if: ${{ !(github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) && github.event.action != 'labeled' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
     strategy:
@@ -159,28 +173,40 @@ jobs:
           retention-days: ${{ inputs.failure-artifact-retention-days }}
           if-no-files-found: ignore
 
-  # The code index of a framework repository, refreshed on the release pull request (staging -> master/main)
-  # once its build and tests are green: Build -> Test -> Reindex -> Push -> Merge. The index is committed on
-  # staging, the head of that pull request, so the rebase merge carries it to master/main like any other
-  # commit, and the post-release realignment brings it back to staging. A repository without a committed
-  # .sts-framework-repo is not indexed. The commit is made only when the content of the index changed -
-  # `sts-tools index build` compares fingerprints - and carries [skip ci]: it changes no code, and the
-  # tests of the code it describes have just passed. RepositoryToken pushes it: the identity behind that
-  # secret must be allowed to push to staging.
+  # The code index of a framework repository, refreshed on every push to staging - the squash merge of a
+  # pull request. It indexes and commits, and tests nothing: the pull request that brought the code tested it.
+  # The index commit goes on top of staging with a plain push and no skip directive, so that when a release
+  # fast-forwards master/main onto it, the push to master/main still starts the run that publishes. The run
+  # that commit starts is skipped here by its author - evaluated without starting a runner - which is what
+  # keeps the job from indexing its own commit. When staging moves while the job runs, the push is rejected
+  # as a non-fast-forward and the job gives way: the newer push has started a run of its own, and the
+  # concurrency group cancels this one or lets it finish without effect. A repository without a committed
+  # .sts-framework-repo is not indexed; the commit is made only when the content of the index changed.
   code-index:
-    needs: build-and-test
-    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'staging' && (github.base_ref == 'master' || github.base_ref == 'main') }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/staging' && github.event.head_commit.author.name != 'sts-code-index' }}
     runs-on: windows-latest
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
+    concurrency:
+      group: code-index-${{ github.repository }}
+      cancel-in-progress: true
     steps:
-      # The branch itself, not the pull request's merge ref: the commit goes on top of staging.
-      - name: Checkout Staging
+      - name: Require The Release Token
+        env:
+          RELEASE_TOKEN: ${{ secrets.ReleaseToken }}
+        run: |
+          if (-not $env:RELEASE_TOKEN) {
+            Write-Error "The ReleaseToken secret is not passed: the index commit cannot be pushed to staging."
+            exit 1
+          }
+
+      # The pushed commit itself: the index describes it, and the index commit goes on top of it.
+      - name: Checkout The Pushed Commit
         uses: actions/checkout@v6
         with:
-          ref: staging
+          ref: ${{ github.sha }}
           path: "./Repo"
           fetch-depth: 1
-          token: ${{ secrets.RepositoryToken }}
+          token: ${{ secrets.ReleaseToken }}
 
       - name: Detect Framework Repository
         id: marker
@@ -207,12 +233,14 @@ jobs:
         if: ${{ steps.marker.outputs.framework == 'true' }}
         run: sts-tools devops pinSdk --folder ./Repo --registryToken "${{ secrets.RegistryToken }}"
 
+      # The checkout folder is always ./Repo, so the name written on every document of the index comes from
+      # the calling repository (a reusable workflow sees its caller's github context).
       - name: Reindex
         if: ${{ steps.marker.outputs.framework == 'true' }}
-        run: sts-tools index build --repository ./Repo --properties "IsWorkflow=true"
+        run: sts-tools index build --repository ./Repo --name "${{ github.event.repository.name }}" --properties "IsWorkflow=true"
 
       # Only the index folder is staged: the SDK pins rewritten above belong to the runner, never to the
-      # repository.
+      # repository. The author name is what the job's condition recognises: change both or neither.
       - name: Push Index
         if: ${{ steps.marker.outputs.framework == 'true' }}
         working-directory: ./Repo
@@ -224,8 +252,98 @@ jobs:
           }
           git config user.name "sts-code-index"
           git config user.email "sts-code-index@users.noreply.github.com"
-          git commit -m "🗂️ chore(index): refresh the code index [skip ci]"
-          git push origin HEAD:staging
+          git commit -m "🗂️ chore(index): refresh the code index"
+          $output = git push origin HEAD:refs/heads/staging 2>&1 | Out-String
+          $pushed = $LASTEXITCODE
+          Write-Host $output
+          if ($pushed -ne 0) {
+            if ($output -match 'rejected|non-fast-forward|fetch first') {
+              Write-Host "::notice::staging moved while the index was built: the run of the newer push indexes it."
+              exit 0
+            }
+            exit $pushed
+          }
+
+  # A pull request into master/main comes from staging, or it is not a release. Without branch protection
+  # (not available on the plan of these repositories) this is a red check, not a block.
+  source-branch:
+    if: ${{ inputs.release-from-staging && github.event_name == 'pull_request' && (github.base_ref == 'master' || github.base_ref == 'main') && github.head_ref != 'staging' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify The Source Branch
+        run: |
+          Write-Error "A pull request into ${{ github.base_ref }} must come from staging, not from ${{ github.head_ref }}."
+          exit 1
+
+  # The release: the `release` label on the pull request staging -> master/main pushes the head that pull
+  # request tested onto master/main, as a fast-forward. The same commits land on both branches, so nothing has
+  # to be realigned afterwards, and the push starts the run that publishes. A merge button cannot do this:
+  # each of GitHub's merge methods writes new commits. The label is removed whatever the outcome, so that
+  # putting it back is how a release is retried.
+  release:
+    if: ${{ inputs.release-from-staging && github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'release' && github.head_ref == 'staging' && (github.base_ref == 'master' || github.base_ref == 'main') }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_BRANCH: ${{ github.base_ref }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Require The Release Token
+        env:
+          RELEASE_TOKEN: ${{ secrets.ReleaseToken }}
+        run: |
+          if (-not $env:RELEASE_TOKEN) {
+            Write-Error "The ReleaseToken secret is not passed: the release cannot push to $env:BASE_BRANCH."
+            exit 1
+          }
+
+      # The build-and-test checks of the head commit, the latest attempt of each: the run the label itself
+      # started reports them as skipped, and a rerun leaves the earlier attempts behind.
+      - name: Verify The Tests Of The Head
+        run: |
+          $runs = gh api --paginate "repos/${{ github.repository }}/commits/$env:HEAD_SHA/check-runs?per_page=100" --jq '.check_runs[] | @json' |
+                  ForEach-Object { $_ | ConvertFrom-Json } |
+                  Where-Object { $_.name -like '*build-and-test*' -and $_.conclusion -ne 'skipped' }
+          $latest = $runs | Group-Object name | ForEach-Object { $_.Group | Sort-Object { [datetime]$_.started_at } | Select-Object -Last 1 }
+          if (-not $latest) {
+            Write-Error "No build-and-test check found for $env:HEAD_SHA: wait for the tests, then put the label back."
+            exit 1
+          }
+          $latest | ForEach-Object { Write-Host "$($_.name): $($_.status) / $($_.conclusion)" }
+          $notGreen = $latest | Where-Object { $_.status -ne 'completed' -or $_.conclusion -ne 'success' }
+          if ($notGreen) {
+            Write-Error "The tests of $env:HEAD_SHA are not all green: fix or wait, then put the label back."
+            exit 1
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.ReleaseToken }}
+
+      # A plain push: git itself refuses anything that is not a fast-forward, and nothing here can force it.
+      - name: Fast-Forward
+        run: |
+          git fetch origin $env:BASE_BRANCH
+          git merge-base --is-ancestor "origin/$env:BASE_BRANCH" $env:HEAD_SHA
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "$env:BASE_BRANCH has commits that $env:HEAD_SHA does not contain: it cannot be fast-forwarded."
+            exit 1
+          }
+          git push origin "$($env:HEAD_SHA):refs/heads/$env:BASE_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            exit 1
+          }
+          Write-Host "$env:BASE_BRANCH fast-forwarded to $env:HEAD_SHA."
+
+      - name: Remove The Label
+        if: ${{ always() }}
+        run: gh pr edit ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --remove-label release
 
   # Packages, on Windows as before, on a runner of its own. The checkout is the pushed commit itself
   # (github.sha), not the branch tip at checkout time: a rerun after the branch moved on publishes what was
