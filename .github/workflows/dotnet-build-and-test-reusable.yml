@@ -301,12 +301,15 @@ jobs:
           }
 
       # The build-and-test checks of the head commit, the latest attempt of each: the run the label itself
-      # started reports them as skipped, and a rerun leaves the earlier attempts behind.
+      # started reports them as skipped, and a rerun leaves the earlier attempts behind. The match is on the
+      # job part of the name, after the caller's prefix: every job is named "<caller job> / <job>", and the
+      # caller's job is itself called Call-Build-And-Test, so a match anywhere in the name would also take
+      # this release job, still running while it checks.
       - name: Verify The Tests Of The Head
         run: |
           $runs = gh api --paginate "repos/${{ github.repository }}/commits/$env:HEAD_SHA/check-runs?per_page=100" --jq '.check_runs[] | @json' |
                   ForEach-Object { $_ | ConvertFrom-Json } |
-                  Where-Object { $_.name -like '*build-and-test*' -and $_.conclusion -ne 'skipped' }
+                  Where-Object { $_.name -cmatch '(^|/ )build-and-test( \(.+\))?$' -and $_.conclusion -ne 'skipped' }
           $latest = $runs | Group-Object name | ForEach-Object { $_.Group | Sort-Object { [datetime]$_.started_at } | Select-Object -Last 1 }
           if (-not $latest) {
             Write-Error "No build-and-test check found for $env:HEAD_SHA: wait for the tests, then put the label back."
