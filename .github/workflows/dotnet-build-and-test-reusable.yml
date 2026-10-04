@@ -49,7 +49,7 @@ on:
         type: boolean
         default: false
       release-from-staging:
-        description: "The repository releases staging into master/main by fast-forward: a pull request into master/main must come from staging, and the `release` label on the release pull request pushes its tested head to master/main. Off for the repositories that keep their own branching model"
+        description: "The repository releases staging into master/main by fast-forward: a pull request into master/main must come from staging, and the `sts-workflow-merge` label on the release pull request pushes its tested head to master/main. Off for the repositories that keep their own branching model"
         type: boolean
         default: false
     secrets:
@@ -275,13 +275,13 @@ jobs:
           Write-Error "A pull request into ${{ github.base_ref }} must come from staging, not from ${{ github.head_ref }}."
           exit 1
 
-  # The release: the `release` label on the pull request staging -> master/main pushes the head that pull
+  # The release: the `sts-workflow-merge` label on the pull request staging -> master/main pushes the head that pull
   # request tested onto master/main, as a fast-forward. The same commits land on both branches, so nothing has
   # to be realigned afterwards, and the push starts the run that publishes. A merge button cannot do this:
   # each of GitHub's merge methods writes new commits. The label is removed whatever the outcome, so that
   # putting it back is how a release is retried.
   release:
-    if: ${{ inputs.release-from-staging && github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'release' && github.head_ref == 'staging' && (github.base_ref == 'master' || github.base_ref == 'main') }}
+    if: ${{ inputs.release-from-staging && github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'sts-workflow-merge' && github.head_ref == 'staging' && (github.base_ref == 'master' || github.base_ref == 'main') }}
     runs-on: ubuntu-latest
     concurrency:
       group: release-${{ github.repository }}
@@ -346,7 +346,7 @@ jobs:
 
       - name: Remove The Label
         if: ${{ always() }}
-        run: gh pr edit ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --remove-label release
+        run: gh pr edit ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --remove-label sts-workflow-merge
 
   # Packages, on Windows as before, on a runner of its own. The checkout is the pushed commit itself
   # (github.sha), not the branch tip at checkout time: a rerun after the branch moved on publishes what was
