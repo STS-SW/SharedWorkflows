@@ -86,10 +86,41 @@ permissions:
 # keeps whatever a test run writes into the checkout out of a package or an image: a fresh checkout is a known
 # state, which `dotnet clean` alone is not, since it removes only what MSBuild built.
 jobs:
+  # Whether a pull request into staging changes nothing but documents: every changed path under Docs/, the
+  # previous path of a renamed file included, so a file moved out of the code still counts as a code change.
+  # No test reads a document, so testing such a pull request proves nothing and only spends the runners.
+  # Only into staging: a release pull request into master/main is always tested, because the release pushes
+  # only a head whose build-and-test is green and not skipped. An empty list, or a list the API could not
+  # give, is not "documents only": when this job fails, build-and-test runs.
+  docs-only:
+    if: ${{ github.event_name == 'pull_request' && github.base_ref == 'staging' && github.event.action != 'labeled' }}
+    runs-on: ubuntu-latest
+    outputs:
+      docs-only: ${{ steps.files.outputs.docs-only }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: List The Changed Files
+        id: files
+        run: |
+          $files = @(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100" --jq '.[] | .filename, (.previous_filename // empty)')
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "The files of the pull request could not be listed."
+            exit 1
+          }
+          $files | ForEach-Object { Write-Host $_ }
+          $code = @($files | Where-Object { -not $_.StartsWith('Docs/') })
+          $docsOnly = $files.Count -gt 0 -and $code.Count -eq 0
+          Write-Host "Changed files: $($files.Count), outside Docs/: $($code.Count), documents only: $docsOnly"
+          "docs-only=$($docsOnly.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
   # Not on a push to staging (the code index runs there), not on a push to master/main (publishing runs there),
-  # and not when a label is added: a label changes no code.
+  # not when a label is added: a label changes no code, and not on a pull request into staging that changes
+  # only documents (see docs-only). !cancelled() stands in for the implicit success() of needs, so a skipped
+  # docs-only - every event but a pull request into staging - does not skip the tests with it.
   build-and-test:
-    if: ${{ !(github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) && github.event.action != 'labeled' }}
+    needs: docs-only
+    if: ${{ !cancelled() && needs.docs-only.outputs.docs-only != 'true' && !(github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) && github.event.action != 'labeled' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
     strategy:
