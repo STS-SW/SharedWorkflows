@@ -266,9 +266,10 @@ jobs:
 
       # The checkout folder is always ./Repo, so the name written on every document of the index comes from
       # the calling repository (a reusable workflow sees its caller's github context).
+      # The `code-index` group name needs sts-tools 2.0.0 or later (it was `index` before).
       - name: Reindex
         if: ${{ steps.marker.outputs.framework == 'true' }}
-        run: sts-tools index build --repository ./Repo --name "${{ github.event.repository.name }}" --properties "IsWorkflow=true"
+        run: sts-tools code-index build --repository ./Repo --name "${{ github.event.repository.name }}" --properties "IsWorkflow=true"
 
       # Only the index folder is staged: the SDK pins rewritten above belong to the runner, never to the
       # repository. The author name is what the job's condition recognises: change both or neither.
