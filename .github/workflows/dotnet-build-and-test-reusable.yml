@@ -86,9 +86,10 @@ permissions:
 # keeps whatever a test run writes into the checkout out of a package or an image: a fresh checkout is a known
 # state, which `dotnet clean` alone is not, since it removes only what MSBuild built.
 jobs:
-  # Whether a pull request into staging changes nothing but documents: every changed path under Docs/, the
-  # previous path of a renamed file included, so a file moved out of the code still counts as a code change.
-  # No test reads a document, so testing such a pull request proves nothing and only spends the runners.
+  # Whether a pull request into staging changes nothing but documents: every changed path under Docs/ or
+  # .claude/ (the AI assistant's instructions, commands and their helper scripts), the previous path of a
+  # renamed file included, so a file moved out of the code still counts as a code change.
+  # No build or test reads either folder, so testing such a pull request proves nothing and only spends the runners.
   # Only into staging: a release pull request into master/main is always tested, because the release pushes
   # only a head whose build-and-test is green and not skipped. An empty list, or a list the API could not
   # give, is not "documents only": when this job fails, build-and-test runs.
@@ -109,9 +110,9 @@ jobs:
             exit 1
           }
           $files | ForEach-Object { Write-Host $_ }
-          $code = @($files | Where-Object { -not $_.StartsWith('Docs/') })
+          $code = @($files | Where-Object { -not ($_.StartsWith('Docs/') -or $_.StartsWith('.claude/')) })
           $docsOnly = $files.Count -gt 0 -and $code.Count -eq 0
-          Write-Host "Changed files: $($files.Count), outside Docs/: $($code.Count), documents only: $docsOnly"
+          Write-Host "Changed files: $($files.Count), outside Docs/ and .claude/: $($code.Count), documents only: $docsOnly"
           "docs-only=$($docsOnly.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
   # Not on a push to staging (the code index runs there), not on a push to master/main (publishing runs there),
