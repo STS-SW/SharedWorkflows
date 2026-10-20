@@ -213,7 +213,7 @@ jobs:
       # No-op for repos without a global.json / msbuild-sdks section.
       - name: Pin Latest STS SDKs
         if: ${{  inputs.platform == 'All' || inputs.platform==runner.os }}
-        run: sts-tools devops pinSdk --folder ./Repo --registryToken "${{ secrets.RegistryToken }}"
+        run: sts-tools devops pin-sdk --folder ./Repo --registry-token "${{ secrets.RegistryToken }}"
 
       # runFolderWorkflow spelled out, plus a configuration. The runner starts from a fresh checkout, so a
       # per-project clean protects nothing - and it deletes the outputs of the referenced projects too, which
@@ -226,7 +226,7 @@ jobs:
         run: |
           $config = Join-Path $env:RUNNER_TEMP "build-once.workflow.json"
           '{ "BuildClean": false, "BuildForce": false }' | Set-Content -Path $config -Encoding utf8
-          sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetBuildAndTest --postWorkflowTask PostDotNetWorkFlow --goToGitRoot --onErrorContinue --isWorkflow --config $config
+          sts-tools devops run-workflow --folder ./Repo --filter "*.csproj" --tasks DotNetBuildAndTest --post-workflow-task PostDotNetWorkFlow --go-to-git-root --on-error-continue --is-workflow --config $config
 
       # What a failed run leaves behind dies with the runner unless it is uploaded: the test results,
       # and whatever the tests themselves wrote to explain a failure. Without it an intermittent
@@ -299,11 +299,11 @@ jobs:
 
       - name: Pin Latest STS SDKs
         if: ${{ steps.marker.outputs.framework == 'true' }}
-        run: sts-tools devops pinSdk --folder ./Repo --registryToken "${{ secrets.RegistryToken }}"
+        run: sts-tools devops pin-sdk --folder ./Repo --registry-token "${{ secrets.RegistryToken }}"
 
       # The checkout folder is always ./Repo, so the name written on every document of the index comes from
       # the calling repository (a reusable workflow sees its caller's github context).
-      # The `code-index` group name needs sts-tools 2.0.0 or later (it was `index` before).
+      # The `code-index` group name needs sts-tools 2.0.0 or later (it was `index` before); the kebab-case names of the other commands need 2.3.0.
       - name: Reindex
         if: ${{ steps.marker.outputs.framework == 'true' }}
         run: sts-tools code-index build --repository ./Repo --name "${{ github.event.repository.name }}" --properties "IsWorkflow=true"
@@ -446,10 +446,10 @@ jobs:
           dotnet tool install --global sts-tools
 
       - name: Pin Latest STS SDKs
-        run: sts-tools devops pinSdk --folder ./Repo --registryToken "${{ secrets.RegistryToken }}"
+        run: sts-tools devops pin-sdk --folder ./Repo --registry-token "${{ secrets.RegistryToken }}"
 
       - name: DotNet Pack
-        run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPack --isWorkflow --registryToken "${{ secrets.RegistryToken }}" --repositoryToken "${{ secrets.RepositoryToken }}"
+        run: sts-tools devops run-workflow --folder ./Repo --filter "*.csproj" --tasks DotNetPack --is-workflow --registry-token "${{ secrets.RegistryToken }}" --repository-token "${{ secrets.RepositoryToken }}"
 
   # Linux, because the image this produces is what a container platform runs - the mirror of the pack job
   # running on Windows. A project that declares no ContainerRepository is skipped by the task itself, so
@@ -485,7 +485,7 @@ jobs:
           dotnet tool install --global sts-tools
 
       - name: Pin Latest STS SDKs
-        run: sts-tools devops pinSdk --folder ./Repo --registryToken "${{ secrets.RegistryToken }}"
+        run: sts-tools devops pin-sdk --folder ./Repo --registry-token "${{ secrets.RegistryToken }}"
 
       - name: DotNet Publish Container
-        run: sts-tools devops runWorkflow --folder ./Repo --filter "*.csproj" --tasks DotNetPublishContainer --isWorkflow --goToGitRoot ${{ inputs.publish-container-latest && '--containerPublishLatest' || '' }} --registryToken "${{ secrets.RegistryToken }}" --repositoryToken "${{ secrets.RepositoryToken }}" --containerRegistryUser "${{ secrets.ContainerRegistryUser }}" --containerRegistryToken "${{ secrets.ContainerRegistryToken }}"
+        run: sts-tools devops run-workflow --folder ./Repo --filter "*.csproj" --tasks DotNetPublishContainer --is-workflow --go-to-git-root ${{ inputs.publish-container-latest && '--container-publish-latest' || '' }} --registry-token "${{ secrets.RegistryToken }}" --repository-token "${{ secrets.RepositoryToken }}" --container-registry-user "${{ secrets.ContainerRegistryUser }}" --container-registry-token "${{ secrets.ContainerRegistryToken }}"
