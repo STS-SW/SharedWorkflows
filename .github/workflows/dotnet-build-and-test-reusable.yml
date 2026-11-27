@@ -248,11 +248,13 @@ jobs:
   # that commit starts is skipped here by its author - evaluated without starting a runner - which is what
   # keeps the job from indexing its own commit. When staging moves while the job runs, the push is rejected
   # as a non-fast-forward and the job gives way: the newer push has started a run of its own, and the
-  # concurrency group cancels this one or lets it finish without effect. A repository without a committed
-  # .sts-framework-repo is not indexed; the commit is made only when the content of the index changed.
+  # concurrency group cancels this one or lets it finish without effect. Every repository goes through the job:
+  # the tool decides what is indexed from the repository's .workflow files (CodeIndex, Ignore), and writes no
+  # index when nothing is selected. The commit is made only when the content of the index changed. Linux gives
+  # the same index as Windows, Windows-only projects included, and is the cheaper runner.
   code-index:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/staging' && github.event.head_commit.author.name != 'sts-code-index' }}
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
     concurrency:
       group: code-index-${{ github.repository }}
@@ -276,45 +278,52 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.ReleaseToken }}
 
-      - name: Detect Framework Repository
-        id: marker
-        run: |
-          $isFramework = Test-Path "./Repo/.sts-framework-repo"
-          "framework=$($isFramework.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-          Write-Host "Framework repository: $isFramework"
-
       - name: Setup
-        if: ${{ steps.marker.outputs.framework == 'true' }}
         uses: STS-SW/SharedWorkflows/.github/actions/setup@master
         with:
           environment: dotnet
           install-quicktype: "false"
 
+      # The selection by the .workflow files and the semantic vectors need sts-tools 3.10.0 or later.
       - name: Install sts-tools
-        if: ${{ steps.marker.outputs.framework == 'true' }}
         run: |
           dotnet nuget add source "https://nuget.pkg.github.com/StsSoftware/index.json" `
             --name Sts.Software --username ci --password "${{ secrets.RegistryToken }}" --store-password-in-clear-text
           dotnet tool install --global sts-tools
 
       - name: Pin Latest STS SDKs
-        if: ${{ steps.marker.outputs.framework == 'true' }}
         run: sts-tools devops pin-sdk --folder ./Repo --registry-token "${{ secrets.RegistryToken }}"
+
+      # The embedding model (about 321 MB), downloaded by the tool from the public models release of this
+      # repository when the committed index carries vectors. The folder is the tool's model store on Linux
+      # (LocalApplicationData/sts-tools/models); the key is the SHA-256 of the model file, the one pinned in
+      # Sts.Tools.CodeIndex/Embedding/EmbeddingModel.cs: change both or neither. A cache miss costs a download,
+      # never a wrong vector: the tool verifies the SHA-256 of every file before loading it.
+      - name: Cache The Embedding Model
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/sts-tools/models
+          key: sts-code-index-model-1aafc4fcd63d2e6899e88402ff731e7c646c2e435048294a3cbc908a40d45d7c
 
       # The checkout folder is always ./Repo, so the name written on every document of the index comes from
       # the calling repository (a reusable workflow sees its caller's github context).
       # The `code-index` group name needs sts-tools 2.0.0 or later (it was `index` before); the kebab-case names of the other commands need 2.3.0.
+      # Vectors are kept up to date only when the committed index already has them; a committed index built with
+      # another model or recipe fails the build, which is then redone locally with --semantic.
       - name: Reindex
-        if: ${{ steps.marker.outputs.framework == 'true' }}
         run: sts-tools code-index build --repository ./Repo --name "${{ github.event.repository.name }}" --properties "IsWorkflow=true"
 
       # Only the index folder is staged: the SDK pins rewritten above belong to the runner, never to the
       # repository. The author name is what the job's condition recognises: change both or neither.
+      # A repository that selects nothing has no index, written or tracked: there is nothing to stage.
       - name: Push Index
-        if: ${{ steps.marker.outputs.framework == 'true' }}
         working-directory: ./Repo
         run: |
-          git add -- .sts-index
+          if (-not (Test-Path ./.sts-index) -and -not (git ls-files -- .sts-index)) {
+            Write-Host "No code index: nothing is selected for indexing."
+            exit 0
+          }
+          git add --all -- .sts-index
           if (-not (git diff --cached --name-only)) {
             Write-Host "Index unchanged: nothing to commit."
             exit 0
